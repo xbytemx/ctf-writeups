@@ -152,4 +152,90 @@ Evidencia: https://goo.gl/ybqo9R
 
 ### Solución
 
+Para solucionar este reto, comenzamos por descargar y descomprimir el archivo del enlace. Una vez que tengamos las partes veremos que con file el archivo se trata de una imagen de Encase, por lo que iniciaremos por tratar de montar la imagen hasta el final.
+
+	file ransomware.E01
+	ransomware.E01: EWF/Expert Witness/EnCase image file format
+	
+Para montar la imagen usaremos xmount:
+
+	xmount --in ewf ransomware.E?? /tmp/Ransomware-Lannister/
+	
+Posterior a eso veremos que el contenido de la imagen esta compuesta por un archivo DD, veamos con fdistk:
+
+	fdisk -l ransomware.dd
+
+![f4-fdisk](images/f4-fdisk.png)
+
+Interesante, dos particiones NTFS, miremos la segunda (recordar que el offset por 512 nos da donde va a tomar la partición mount)
+
+	mkdir /tmp/ntfs2/
+	mount -t ntfs -o ro,offset=105906176 /tmp/Ransomware-Lannister/ransomware.dd /tmp/ntfs2/
+
+Cargamos la partición 2 de NTFS en una carpeta temporal de donde podemos explorar el contenido.
+
+![f4-windows](images/f4-windows.png)
+
+Como podemos ver tenemos una estructura MS Windows. De hecho parece que son las VM que distribuye Win para para probar IE y MS Edge...
+
+Si miramos al usuario IEuser en sus carpetas de documentos y escritorio encontraremos al famoso WANNACRY gritando por todos lados.
+
+![f4-homeuser](images/f4-homeuser.png)
+
+Sospechosos, contactos.rtf, bitcoin.pdf y keys.docx... busquemoslos en copia:
+
+	find . -iname "*keys.docx*" -or -iname "*contactos\.rtf*" -or -iname "*bitcoin.pdf*" 2>/dev/null 
+
+![f4-files](images/f4-files.png)
+
+No-wannaencriptado?
+
+	ls -lah ./Users/IEUser/Music/
+
+![f4-keys](images/f4-keys.png)
+
+Buuu, tendremos de buscar como extraerlo... tal vez photorec o el mismo autopsy...
+
+Bueno, creamos un caso en autopsy, cargamos las 6 partes del Encase y agregamos las 2 particiones.
+
+Buscamos a nuestro archivo en cuestión y lo exportamos.
+
+![f4-autopsy](images/f4-autopsy.png)
+
+Al abrirlo notamos que el contenido parece y se ve como flag, pero como otros retos esto no es mas que un indicativo de que vamos por el camino correcto.
+
+![f4-word1](images/f4-word1.png)
+
+Si revisamos en google "windows shadow" encontraremos resultados al respecto de Shadow Copies, las cuales son una función desde XP que nos permite mantener "versiones" de nuestros documentos, probemos a buscar si en la imagen DD tenemos shadow copies con libvshadow en la partición 2:
+
+	vshadowinfo -o 105906176 /tmp/Ransomware-Lannister/ransomware.dd
+	
+![f4-shadowinfo](images/f4-shadowinfo.png)
+
+De acuerdo, hay dos snapshots. Probemos a montar los shadow snapshots, hacer un mount en read-only y explorar el último snapshot:
+
+	vshadowmount -o 105906176 /tmp/Ransomware-Lannister/ransomware.dd /tmp/ntfs2/
+	mount -o ro /tmp/ntfs2/vss2 /tmp/ntfs1/
+
+Realicemos la búsqueda de archivos que hicimos al inicio:
+
+	find /tmp/ntfs1/ -iname "*keys.docx*" -or -iname "*contactos\.rtf*" -or -iname "*bitcoin.pdf*" 2>/dev/null 
+
+![f4-files_ushadow](images/f4-files_ushadow.png)
+
+Si abrimos los archivos PDF, veremos el paper de Satoshi sobre Bitcoin, si abrimos contactos.rtf veremos  que es un formato sin datos, pero si abrimos el archivo que antes estaba cifrado "./Users/IEUser/Documents/keys.docx" veremos la flag:
+
+	cp /tmp/ntfs1/Users/IEUser/Documents/keys.docx /tmp/keys.docx
+	lowriter /tmp/keys.docx
+
+![f4-flag](images/f4-flag.png)
+
+
+Nota: el otro camino más rápido para conseguir la flag, es usar autopsy4.5 y buscar el string "flag{" el cual nos lleva al document.xml del archivo shadow copy.
+
+
 ### Flag
+
+	flag{shadow_copies_against_ransomware}
+	
+## The END
